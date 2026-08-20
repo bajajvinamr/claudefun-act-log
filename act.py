@@ -252,8 +252,14 @@ def guard(ledger: Path, since: str | None) -> int:
     nothing if the acts never entered it. Per night twenty-five: a detector must
     state its denominator.
     """
+    # Join argv with spaces, do NOT json.dumps it. Found 2026-08-21 minutes after
+    # this shipped: `gh repo create ...` had just gone through the ledger and this
+    # reported 0/8, because json.dumps(["gh","repo","create"]) is
+    # '["gh", "repo", "create"]' — every token present, the phrase absent. The
+    # detector was searching a representation the target cannot occur in, which is
+    # the same defect as matching `"` against a TOML file that can only hold `'`.
     logged = " ".join(
-        json.dumps(r.get("argv") or []) + " " + str(r.get("intent", ""))
+        " ".join(r.get("argv") or []) + " " + str(r.get("intent", ""))
         for r in _read(ledger)
     )
     print(f"outward markers watched: {len(OUTWARD_MARKERS)}")

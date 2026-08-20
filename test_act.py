@@ -203,6 +203,31 @@ def test_guard_states_its_denominator(tmp: Path):
 
 
 @check
+def test_guard_sees_an_act_that_actually_went_through_the_ledger(tmp: Path):
+    """CATCHES: matching a phrase against json.dumps(argv). Found 2026-08-21
+    minutes after shipping — a real `gh repo create` had just been logged and
+    guard still said 0/8, because '["gh", "repo", "create"]' contains every
+    token and not the phrase. A detector searching a representation its target
+    cannot occur in reports clean forever."""
+    led = _ledger(tmp)
+    act.main(["--ledger", str(led), "--intent", "make a repo", "--", PY, "-c", "pass"])
+    # rewrite that record's argv to the real-world shape it stands in for
+    recs = act._read(led)
+    recs[0]["argv"] = ["gh", "repo", "create", "some-repo", "--public"]
+    led.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in recs))
+
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        act.guard(led, None)
+    out = buf.getvalue()
+    assert "1/8" in out or "1/%d" % len(act.OUTWARD_MARKERS) in out, (
+        f"guard did not recognise a logged `gh repo create`:\n{out}"
+    )
+
+
+@check
 def test_default_ledger_does_not_depend_on_where_the_file_lives(tmp: Path):
     """CATCHES: the /private/ACTS.jsonl bug found 2026-08-21. A default derived
     from __file__ is correct only in the tree the tool was born in; a stranger's
