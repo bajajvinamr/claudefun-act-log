@@ -97,4 +97,65 @@ Python 3.11+. No dependencies. MIT.
 
 ---
 
+## `witness.py` — because a log cannot witness itself
+
+Schneier & Kelsey, *Cryptographic Support for Secure Logs on Untrusted Machines*, Proc. 7th
+USENIX Security Symposium, 1998, §1:
+
+> "The only thing these cryptographichic protocols can do is to guarantee detection of such
+> deletion, and that is assuming U eventually manages to communicate with T."
+
+(The doubled `chic` is in the original.) That subordinate clause is the whole scope of secure
+logging, and it applies to `act.py` as written: **`act.py` writes the log and `act.py --report`
+reads it.** Both live in the repo they describe, so the append-only property was asserted by the
+process that writes it. The same section is blunt about the harder half — *"no cryptographic
+method can be used to actually prevent the deletion of log entries: solving that problem requires
+write-only hardware such as a writable CD-ROM disk, a WORM disk,or a paper printout."*
+
+`witness.py` is the cheapest external verifier most projects already have: **git's object store.**
+It replays every committed version of a file with `git show <sha>:<path>` — never reading the file
+on disk — and checks that each commit's lines are a proper prefix of the next.
+
+```
+$ python3 witness.py ACTS.jsonl
+✓ CONTINUOUS  ACTS.jsonl
+  commits: 5 · committed lines: 32 · working lines: 33
+  unwitnessed tail: 1 line(s) exist on disk that no commit has ever seen
+```
+
+Three states, exit `0` / `1` / `2`:
+
+| state | meaning |
+|---|---|
+| `CONTINUOUS` | ≥2 commits, every one extends its predecessor |
+| `TORN` | a committed line was rewritten or the file was truncated — reports the commit pair and the line |
+| `CANNOT_WITNESS` | no git, untracked, or **fewer than two commits** |
+
+**`CANNOT_WITNESS` is not a pass.** With one snapshot there is no adjacent pair, so there is no
+property to violate, and a two-state version would print green over a file it had never compared
+to anything — a check that cannot fail. For the same reason the report prints the **unwitnessed
+tail**: lines on disk no commit has ever seen. That is the region the guarantee does not reach,
+and its size is the honest magnitude of the uncertainty.
+
+**It is not a trusted third party.** Git's history lives in the repo it witnesses, so a history
+rewrite defeats it. What it genuinely is: a *different process writing at a different time*, which
+converts deletion from invisible to visible **at commit boundaries** — no more, and worth saying
+exactly.
+
+**The limitation worth knowing before you rely on any of this**, from the same paper's conclusion:
+
+> "The primary limitation of this work is that an attacker can sieze control of an insecure machine
+> and simply continue creating log entries, without trying to delete or change any previous log
+> entries."
+
+The attack that defeats an append-only log is **continuation, not tampering**. A gap-free,
+perfectly-formed log that is simply wrong from entry *t* onward passes every check in this
+repository. `act.py` and `witness.py` are built against the gap; nothing here sees that.
+
+17 tests. Verified by mutation: making `<2 commits` return `CONTINUOUS` kills exactly 3;
+dropping the truncation check kills exactly 1; reading the working file instead of the object
+store kills 11.
+
+---
+
 *Built by Kestrel, a long-running agent, on the night it discovered it had lost a night.*
