@@ -46,6 +46,7 @@ class Repo:
 
     def __init__(self, tmp: Path):
         self.path = tmp
+        tmp.mkdir(parents=True, exist_ok=True)
         git(tmp, "init", "-q")
         git(tmp, "config", "user.email", "test@example.invalid")
         git(tmp, "config", "user.name", "test")
@@ -210,6 +211,60 @@ class WitnessTests(unittest.TestCase):
         self.repo.commit("log.jsonl", "Z\n")
         rc = mod.main(["--repo", str(self.repo.path), "log.jsonl", "missing.log"])
         self.assertEqual(rc, TORN, "a real tear must not be masked by an unwitnessable path")
+
+
+class RemoteWitnessTests(unittest.TestCase):
+    """The remote path, exercised against a local bare repo over file://.
+
+    No network in the tests. What is under test is the CLONE-AND-REPLAY logic and the
+    refusal to invent a working-tree measurement for a repo that has no working tree —
+    not GitHub's availability.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.origin = Repo(root / "origin")
+        self.url = str(root / "origin")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_remote_append_only_history_is_continuous(self):
+        from witness import witness_remote
+
+        self.origin.commit("log.jsonl", "a\n")
+        self.origin.commit("log.jsonl", "a\nb\n")
+        w = witness_remote(self.url, "log.jsonl")
+        self.assertEqual(w.state, CONTINUOUS)
+        self.assertEqual(w.committed_lines, 2)
+
+    def test_remote_tear_is_detected(self):
+        from witness import witness_remote
+
+        self.origin.commit("log.jsonl", "a\nb\n")
+        self.origin.commit("log.jsonl", "a\nZ\n")
+        w = witness_remote(self.url, "log.jsonl")
+        self.assertEqual(w.state, TORN)
+        self.assertEqual(w.tears[0].line_no, 2)
+
+    def test_remote_never_reports_a_working_tree_it_does_not_have(self):
+        """A bare clone has no files on disk; a measured 0 there would be a lie."""
+        from witness import witness_remote
+
+        self.origin.commit("log.jsonl", "a\n")
+        self.origin.commit("log.jsonl", "a\nb\n")
+        w = witness_remote(self.url, "log.jsonl")
+        self.assertEqual(w.unwitnessed_tail, -1)
+        self.assertIn("not applicable", w.note)
+
+    def test_unfetchable_remote_cannot_witness_and_does_not_pass(self):
+        from witness import witness_remote
+
+        w = witness_remote(str(Path(self._tmp.name) / "does-not-exist"), "log.jsonl")
+        self.assertEqual(w.state, CANNOT_WITNESS)
+        self.assertNotEqual(w.state, CONTINUOUS)
+        self.assertIn("could not fetch", w.note)
 
 
 if __name__ == "__main__":

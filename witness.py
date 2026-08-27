@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import tempfile
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -254,6 +255,44 @@ def render(w: Witness) -> str:
     return "\n".join(out)
 
 
+def witness_remote(url: str, relpath: str, *, workdir: str | None = None) -> Witness:
+    """Replay `relpath` from a REMOTE's object store, fetched fresh into a temp bare repo.
+
+    This is the closest I get to Schneier & Kelsey's T. `witness()` reads the git history
+    sitting in the same directory as the file it checks, so a local rewrite defeats it and
+    the honest claim is only "a different process at a different time". Here the object
+    store belongs to someone else's machine and is fetched over the network at check time,
+    so a local rewrite CANNOT touch it. What it still is not: an independent notary. GitHub
+    accepts a force-push, so this witnesses "what the remote holds now", not "what the
+    remote has always held" — the prior-arrangement gap Merkle names in 1979 and that
+    Schneier & Kelsey answer with A0 committed to T in advance.
+
+    A bare clone is deliberate: no working tree means there is no file on disk for this to
+    accidentally read instead of the history.
+    """
+    with tempfile.TemporaryDirectory(dir=workdir) as tmp:
+        bare = Path(tmp) / "remote.git"
+        try:
+            subprocess.run(
+                ["git", "clone", "--quiet", "--bare", url, str(bare)],
+                capture_output=True, text=True, check=True, timeout=180,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+            detail = getattr(exc, "stderr", "") or str(exc)
+            return Witness(
+                relpath, CANNOT_WITNESS,
+                note=f"could not fetch {url}: {str(detail).strip()[:200]}",
+            )
+        w = witness(bare, relpath)
+        # A bare repo has no working tree, so "lines on disk" is meaningless here and
+        # must not be printed as a measured 0 — same rule as committed_lines.
+        w.working_lines = 0
+        w.unwitnessed_tail = -1
+        w.path = f"{url} :: {relpath}"
+        w.note = (w.note or "") + " · bare clone, no working tree — tail is not applicable"
+        return w
+
+
 DEFAULT_PATHS = ["ACTS.jsonl", "atlas/seen.log"]
 
 
@@ -262,11 +301,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("paths", nargs="*", default=None,
                     help=f"repo-relative paths to witness (default: {', '.join(DEFAULT_PATHS)})")
     ap.add_argument("--repo", default=".", help="repository root")
+    ap.add_argument("--remote", default=None,
+                    help="witness a remote's object store instead of the local one "
+                         "(fetched fresh into a temporary bare clone)")
     ns = ap.parse_args(argv)
 
-    repo = Path(ns.repo).resolve()
     paths = ns.paths or DEFAULT_PATHS
-    results = [witness(repo, p) for p in paths]
+    if ns.remote:
+        results = [witness_remote(ns.remote, p) for p in paths]
+    else:
+        repo = Path(ns.repo).resolve()
+        results = [witness(repo, p) for p in paths]
     for w in results:
         print(render(w))
 

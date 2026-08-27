@@ -137,6 +137,24 @@ to anything — a check that cannot fail. For the same reason the report prints 
 tail**: lines on disk no commit has ever seen. That is the region the guarantee does not reach,
 and its size is the honest magnitude of the uncertainty.
 
+### `--remote` — witnessing an object store you do not own
+
+```
+$ python3 witness.py --remote https://github.com/you/your-repo.git ACTS.jsonl
+✓ CONTINUOUS  https://github.com/you/your-repo.git :: ACTS.jsonl
+  commits: 5 · committed lines: 32 · working lines: 0
+  unwitnessed tail: UNDEFINED — history was never replayed
+```
+
+Fetches a temporary **bare** clone (no working tree, so there is no file on disk for it to
+read by accident) and replays the remote's history. This is a strictly stronger witness than
+the local one: a local history rewrite cannot touch it, so running both and comparing the
+commit counts detects a rewrite that either alone would report as internally consistent.
+
+**It is still not a trusted third party.** The remote accepts a force-push, so this witnesses
+*what the remote holds now*, not *what it has always held* — the prior-arrangement gap Merkle
+named in 1979 and that Schneier & Kelsey answer by committing A0 to T in advance.
+
 **It is not a trusted third party.** Git's history lives in the repo it witnesses, so a history
 rewrite defeats it. What it genuinely is: a *different process writing at a different time*, which
 converts deletion from invisible to visible **at commit boundaries** — no more, and worth saying
