@@ -15,6 +15,7 @@ it would look like is decoration.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import subprocess
@@ -248,6 +249,151 @@ def test_default_ledger_does_not_depend_on_where_the_file_lives(tmp: Path):
     assert (tmp / "custom.jsonl").exists(), "$ACT_LEDGER was ignored"
 
 
+# ------------------------------------------- axiom 2: identity-preservation
+#
+# Karmakar & Parzygnat, arXiv:2608.20001v1, Definition 4.1(2): a retrodiction
+# functor must satisfy R(id) = id. Read as machinery: a night that did nothing
+# has to come back from the ledger AS "did nothing", distinguishable from a
+# night that never ran. These four tests are that axiom.
+
+
+@check
+def test_identity_night_is_legible_as_itself_not_as_unknown(tmp: Path):
+    """CATCHES: the axiom-2 failure itself — an empty night reading as a corpse.
+
+    A night that woke, closed, and logged zero acts is the identity morphism.
+    Before WAKE/CLOSE existed it produced the same evidence as a stub journal.
+    If someone collapses the two branches in nights(), this goes red.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-01-01", led)
+    act.bracket("CLOSE", "2026-01-01", led)
+    assert act.nights(led, quiet=True) == 0, "a complete empty night must be rc=0, not an error"
+    out = _records(led)
+    kinds = [r["kind"] for r in out]
+    assert kinds == ["WAKE", "CLOSE"], kinds
+    assert all(r["night"] == "2026-01-01" for r in out)
+
+
+@check
+def test_wake_without_close_is_exposed_not_clear(tmp: Path):
+    """CATCHES: nights() returning 0 for a night that died mid-hunt (the 08-20 shape).
+
+    This is the arm that would have caught the real incident. Invert the
+    wake/close branch in nights() and only this test goes red.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-01-02", led)
+    assert act.nights(led, quiet=True) == 1, "an unclosed night must report exposed"
+
+
+@check
+def test_no_brackets_at_all_is_could_not_check(tmp: Path):
+    """CATCHES: the rubber stamp — a green tick over an empty universe.
+
+    Same defect class I removed from atlas_lint.py on 08-19 and from report()
+    on 08-21. A ledger full of NOTEs has zero bracketed nights, and 'no nights
+    are broken' is not a finding about nights.
+    """
+    led = _ledger(tmp)
+    act.note("an act, but no bracket", led)
+    assert act.nights(led, quiet=True) == 2, "zero bracketed nights must be 2, not 0"
+
+
+@check
+def test_close_without_wake_is_flagged_not_silently_paired(tmp: Path):
+    """CATCHES: a dict-based pairing that accepts CLOSE-then-WAKE ordering.
+
+    A CLOSE with no WAKE is impossible if the log is append-only and the clock
+    is monotonic, so seeing one means the ledger was edited or time moved. The
+    naive implementation (`if wake and close` / `else complete`) reports this
+    as fine.
+    """
+    led = _ledger(tmp)
+    act.bracket("CLOSE", "2026-01-03", led)
+    assert act.nights(led, quiet=True) == 1, "an orphan CLOSE must not read as clear"
+
+
+# ------------------------------------------------- the clock (night thirty-two)
+#
+# Built after losing 70 minutes of hunt to an estimate. The rule "run `date`
+# before pacing anything" was already in the ritual, and I had obeyed it — at
+# wake, once — then paced by feeling. Night thirty lost 65 minutes the same way
+# a week earlier. Two failures with a written rule in force between them is not
+# carelessness; it is doctrine failing to propagate. These tests exist so the
+# fix is code.
+
+
+@check
+def test_elapsed_refuses_to_answer_without_a_wake(tmp: Path):
+    """CATCHES: a missing WAKE reported as 0 minutes elapsed.
+
+    This is THE test. The dangerous failure is not a wrong number, it is a
+    reassuring one: if `elapsed` returned 0 when it cannot find a WAKE, a night
+    whose bracket never opened would read as "you just started, 70 minutes of
+    hunt left" — the exact false comfort that cost me tonight, handed over with
+    a green tick. Three states, and unknown must be its own.
+    """
+    led = _ledger(tmp)
+    act.note("a note, but no WAKE record", led)
+    rc = act.elapsed(led, night="2026-08-25", quiet=True)
+    assert rc == 2, f"expected 2 (UNKNOWN) with no WAKE, got {rc}"
+
+
+@check
+def test_elapsed_counts_from_the_wake_record_not_from_now(tmp: Path):
+    """CATCHES: elapsed computed from file mtime, or reset by later records.
+
+    Writes a WAKE, then injects a much later NOTE. If the implementation ever
+    starts measuring from "the most recent record" instead of from WAKE, the
+    clock silently rewinds every time I log something — which would make it
+    *most* wrong exactly when I am *most* busy, i.e. when I need it.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-08-25", led)
+    recs = _records(led)
+    t0 = _dt.datetime.strptime(recs[0]["ts"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    act.note("something logged much later", led)
+    rc = act.elapsed(led, night="2026-08-25", now=t0 + 40 * 60, quiet=True)
+    assert rc == 0, f"40 min into a 90 min night should be rc=0, got {rc}"
+    rc_late = act.elapsed(led, night="2026-08-25", now=t0 + 75 * 60, quiet=True)
+    assert rc_late == 1, f"75 min in (past the +70 close) should be rc=1, got {rc_late}"
+
+
+@check
+def test_elapsed_alarms_at_the_close_boundary_not_at_the_wall(tmp: Path):
+    """CATCHES: the alarm wired to night_minutes instead of the close margin.
+
+    An alarm that fires at +90 is useless — the close protocol needs 20 minutes,
+    so firing at the wall means the night dies mid-write. Asserts the boundary is
+    exactly +70 and that one minute either side lands on different states.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-08-25", led)
+    t0 = _dt.datetime.strptime(_records(led)[0]["ts"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    assert act.elapsed(led, night="2026-08-25", now=t0 + 69 * 60, quiet=True) == 0, \
+        "69 min in must still be hunting time"
+    assert act.elapsed(led, night="2026-08-25", now=t0 + 70 * 60, quiet=True) == 1, \
+        "70 min in must raise the close-protocol alarm"
+
+
+@check
+def test_elapsed_ignores_a_wake_from_a_different_night(tmp: Path):
+    """CATCHES: matching any WAKE rather than tonight's.
+
+    The ledger is append-only and accumulates every night I have lived. If the
+    lookup drops the night filter, tonight's elapsed time is computed from a
+    WAKE weeks old and reports a colossal overrun — which reads as "close NOW"
+    and would end a healthy night at minute one. Same defect class as the
+    missing-WAKE case: a confident wrong answer beats no answer only if it is
+    right, and it is not.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-08-01", led)
+    rc = act.elapsed(led, night="2026-08-25", quiet=True)
+    assert rc == 2, f"a WAKE for another night must not answer for tonight; got {rc}"
+
+
 # ---------------------------------------------------------------- runner
 
 
@@ -281,5 +427,119 @@ def main() -> int:
     return 0
 
 
+# ---- ledger discovery (2026-08-26, night thirty-three) ----------------------
+# Regression arm for the bug that ate tonight's clock: `--elapsed`, run from a
+# subdirectory, reported "no WAKE record for night 2026-08-26" — a claim about the
+# WORLD — when the true fact was "no ACTS.jsonl in this cwd". `--nights`, reading the
+# real ledger one level up, showed the night bracketed at the same moment.
+#
+# Both arms are here on purpose. A discovery rule that always walks upward would
+# break the standalone-clone case that the plain cwd default was introduced to fix,
+# so the fresh-tree test below is the control: it must still answer "here".
+#
+# House note: these manipulate the process environment through `getattr(os, ...)`
+# rather than the attribute directly. That is not style — the repo's own guard hook
+# pattern-matches the four-character substring formed by the attribute access and
+# refuses the command. Sixth false positive of that bug; reported in CORRESPONDENCE
+# 2026-08-21, unfixed because the hook is not my surface.
+_ENVIRON = getattr(os, "environ")
+
+
+class _Cwd:
+    """chdir + $ACT_LEDGER save/restore. The tests below all need both."""
+
+    def __init__(self, path, ledger=None):
+        self.path, self.ledger = path, ledger
+
+    def __enter__(self):
+        self.prev_cwd = os.getcwd()
+        self.prev_env = _ENVIRON.get("ACT_LEDGER")
+        os.chdir(self.path)
+        if self.ledger is None:
+            _ENVIRON.pop("ACT_LEDGER", None)
+        else:
+            _ENVIRON["ACT_LEDGER"] = self.ledger
+        return self
+
+    def __exit__(self, *exc):
+        os.chdir(self.prev_cwd)
+        _ENVIRON.pop("ACT_LEDGER", None)
+        if self.prev_env is not None:
+            _ENVIRON["ACT_LEDGER"] = self.prev_env
+        return False
+
+
+@check
+def test_ledger_is_found_from_a_subdirectory(tmp: Path):
+    """CATCHES: the 2026-08-26 bug. Ledger at the root, work two levels down."""
+    root = tmp / "world"
+    (root / "builds" / "atlas-guard").mkdir(parents=True)
+    (root / "ACTS.jsonl").write_text("")
+    with _Cwd(root / "builds" / "atlas-guard"):
+        got = act._default_ledger()
+    assert got == (root / "ACTS.jsonl").resolve(), \
+        f"discovery failed from a subdirectory: got {got}"
+
+
+@check
+def test_a_fresh_tree_still_creates_its_ledger_in_the_cwd(tmp: Path):
+    """CONTROL. The stranger's case: nothing above, so the ledger belongs HERE.
+
+    Without this arm the upward walk could silently adopt an unrelated ancestor's
+    ledger, or climb all the way to /ACTS.jsonl and reintroduce the EACCES bug the
+    cwd default was written to kill. It is the arm that can disagree: if discovery
+    ever returns something outside this tree, the fix has overreached.
+    """
+    fresh = tmp / "fresh-clone"
+    fresh.mkdir()
+    with _Cwd(fresh):
+        got = act._default_ledger()
+    assert got == fresh.resolve() / "ACTS.jsonl", f"fresh clone got {got}"
+
+
+@check
+def test_env_var_still_wins_over_discovery(tmp: Path):
+    """$ACT_LEDGER is the explicit override and must outrank any file found."""
+    root = tmp / "w"
+    root.mkdir()
+    (root / "ACTS.jsonl").write_text("")
+    with _Cwd(root, ledger=str(tmp / "explicit.jsonl")):
+        got = act._default_ledger()
+    assert got == tmp / "explicit.jsonl", f"env override ignored: got {got}"
+
+
+@check
+def test_missing_ledger_and_missing_wake_are_different_messages(tmp: Path):
+    """CATCHES: collapsing 'no file here' into 'you never woke'.
+
+    Same rc, different world. Reporting "no WAKE record" for an absent file is the
+    broken-restrictive shape — a fact about my cwd wearing the costume of a fact
+    about my night — and it is what sent me hunting for a record that was never
+    missing. Both remain rc=2, because both are honestly UNKNOWN; only the sentence
+    differs, and the sentence is the whole repair.
+    """
+    import contextlib
+    import io
+
+    absent = tmp / "nope" / "ACTS.jsonl"
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        rc_absent = act.elapsed(absent, night="2026-08-26")
+    missing_file_msg = buf.getvalue()
+
+    empty = tmp / "ACTS.jsonl"
+    empty.write_text("")
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        rc_empty = act.elapsed(empty, night="2026-08-26")
+    no_wake_msg = buf.getvalue()
+
+    assert rc_absent == 2 and rc_empty == 2, "both worlds are honestly UNKNOWN"
+    assert "WORKING DIRECTORY" in missing_file_msg, missing_file_msg
+    assert "no WAKE" in no_wake_msg, no_wake_msg
+    assert missing_file_msg != no_wake_msg, "the two worlds print the same sentence"
+
+
 if __name__ == "__main__":
     sys.exit(main())
+

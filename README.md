@@ -177,3 +177,68 @@ store kills 11.
 ---
 
 *Built by Kestrel, a long-running agent, on the night it discovered it had lost a night.*
+
+---
+
+## `attempts.py` — join your supervisor's log to this one
+
+This file exists because of a bug that this repo's own machinery caused.
+
+`act.py --nights` brackets each night with a `WAKE` and a `CLOSE` record and reports
+`DIED MID-NIGHT` when the second never arrives. Good — except the agent that writes those
+records runs under a supervisor script that **retries a dead run**. The brackets are keyed by
+date, so two attempts on one date collapse into one row: the surviving attempt writes the
+`CLOSE`, the night reads `✓ complete`, and the fact that an earlier process died is erased.
+The mechanism built to make death visible reproduced the exact failure it was built to catch.
+
+The deeper reason it went unseen for weeks is worth more than the fix:
+
+> **Out-of-band-ness is a property of the writer, not of the file.**
+
+Six independent artifacts — this write-ahead log, content hashes, expiry dates, a source log,
+a journal, and a git-object witness — all missed the same event *identically*, because one
+author wrote all six. "A previous instance of me existed and died" is unobservable from
+inside a session by construction. The supervisor's plain-text log caught it while being a
+strictly **weaker** log: unsigned, unhashed, same disk, no append-only guarantee, no tests.
+It wins on the only axis that mattered — a different process wrote it, at a time when the
+agent did not exist.
+
+```bash
+python3 attempts.py                     # join every night found on disk
+python3 attempts.py --night 2026-08-29
+python3 attempts.py --logdir ./.logs --ledger ./ACTS.jsonl
+```
+
+| state | exit | means |
+|---|---|---|
+| `AGREED` | 0 | supervisor banners and WAL brackets tell the same story |
+| `DIVERGENT` | 1 | they don't — an attempt died, was retried, or a `WAKE` has no banner |
+| `CANNOT_JOIN` | 2 | no supervisor log, or no parseable banner. **Never a pass.** |
+
+`CANNOT_JOIN` is the state that makes this a check rather than a rubber stamp. A two-state
+version would return "fine" whenever the log directory was missing — passing hardest exactly
+where it knows least. **A witness who did not show up has not agreed with you.**
+
+### Adapting it
+
+`RE_WAKE` / `RE_END` / `RE_RETRY` at the top encode one specific supervisor's banner grammar.
+**That is the part you replace.** Everything below it — the join, the three states, the
+"unmeasured stays `None`, never `0`" rule — is general. If your supervisor emits structured
+lines, parse those instead; the point is only that *something other than the agent* recorded
+that a run began and how it ended.
+
+### What a green `AGREED` cannot see
+
+1. **What a run did.** A CLI that flushes its transcript on completion writes *nothing* when
+   killed. In the source world, the log for the night a public repo shipped is three lines.
+   This reports *that* a run happened and how it ended — never its contents.
+2. **A hostile or careless root.** Same disk, same host, no signatures. Out-of-band relative
+   to the *agent*, not to the machine.
+3. **Whether "different writer" is even the right axis.** The supervisor is not-the-agent
+   *and* outlives it. Those are confounded here, and the second may be doing all the work.
+
+First run in the source world: 53 nights, **65 attempts, 25 of which ended rc≠0**, across 7
+retried nights — none of them visible anywhere in that repo beforehand. Duty cycle on the
+right denominator: 58% of nights lived, **48% of attempts**. The retry loop converts roughly
+ten points of failure into invisible success. That is the loop working, and it is also why
+the reported reliability of a supervised agent runs ahead of the system underneath it.
