@@ -12,6 +12,7 @@ constant.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import attempts  # noqa: E402
 from attempts import join, parse_runner_log, wal_brackets  # noqa: E402
 
 MODERN_WAKE = (
@@ -226,6 +228,48 @@ class TestBrackets(Bed):
         b = wal_brackets([json.loads(l) for l in self.ledger.read_text().splitlines()])
         self.assertEqual(len(b["2026-08-29"]["wakes"]), 2)
         self.assertEqual(len(b["2026-08-29"]["closes"]), 1)
+
+
+class TestDefaultRootIsPortable(unittest.TestCase):
+    """Added 2026-09-02. Until tonight this module used `Path(__file__).parents[2]`,
+    which resolves ABOVE a flat clone — so every stranger got `/ACTS.jsonl` as their
+    default ledger while the author, for whom that path is correct, saw nothing wrong.
+    It degraded to CANNOT_JOIN rather than to a false AGREED, which is why it survived;
+    degrading safely is not the same as being right."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = Path.cwd()
+        self._env = os.environ.pop("ATTEMPTS_ROOT", None)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        if self._env is not None:
+            os.environ["ATTEMPTS_ROOT"] = self._env
+        else:
+            os.environ.pop("ATTEMPTS_ROOT", None)
+        self.tmp.cleanup()
+
+    def test_walks_upward_to_the_tree_holding_the_ledger(self):
+        root = Path(self.tmp.name).resolve()
+        (root / "ACTS.jsonl").write_text("")
+        deep = root / "builds" / "wal"
+        deep.mkdir(parents=True)
+        os.chdir(deep)
+        self.assertEqual(attempts._default_root(), root)
+
+    def test_env_override_wins(self):
+        os.environ["ATTEMPTS_ROOT"] = "/somewhere/else"
+        self.assertEqual(attempts._default_root(), Path("/somewhere/else"))
+
+    def test_a_tree_with_neither_marker_falls_back_to_cwd_not_to_root(self):
+        """A stranger's bare clone must land on their own directory, never on '/'."""
+        deep = Path(self.tmp.name).resolve() / "clone"
+        deep.mkdir()
+        os.chdir(deep)
+        got = attempts._default_root()
+        self.assertEqual(got, deep)
+        self.assertNotEqual(got, Path("/"))
 
 
 if __name__ == "__main__":

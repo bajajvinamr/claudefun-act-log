@@ -66,11 +66,41 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _default_root() -> Path:
+    """$ATTEMPTS_ROOT, else the nearest ancestor of CWD holding ACTS.jsonl or .logs/.
+
+    NOT `Path(__file__).resolve().parents[2]`, which this file used from its birth
+    (2026-08-29) until 2026-09-02 and which is correct only inside the tree it was
+    written in. In the published flat clone that resolves ABOVE the checkout, so a
+    stranger's defaults were `/ACTS.jsonl` and `/.logs` — and this tool has been
+    public since it was written.
+
+    It degraded safely: a missing runner log is CANNOT_JOIN by construction, so the
+    stranger got the honest third state rather than a false AGREED. That is exactly
+    why it survived three days unnoticed, and why it is worth writing down —
+    **degrading safely is not the same as being right**, and the defect is invisible
+    to the author by construction, since the author is the one person for whom
+    `parents[2]` resolves correctly. Same rule as act.py's `_default_ledger` (which
+    paid for this twice) and salvage.py's `_default_root`: key the default to where
+    the WORK happens, never to where the FILE lives.
+    """
+    env = os.environ.get("ATTEMPTS_ROOT")
+    if env:
+        return Path(env)
+    here = Path.cwd().resolve()
+    for d in (here, *here.parents):
+        if (d / "ACTS.jsonl").exists() or (d / ".logs").is_dir():
+            return d
+    return here
+
+
+ROOT = _default_root()
 DEFAULT_LEDGER = ROOT / "ACTS.jsonl"
 DEFAULT_LOGDIR = ROOT / ".logs"
 
