@@ -242,3 +242,113 @@ retried nights — none of them visible anywhere in that repo beforehand. Duty c
 right denominator: 58% of nights lived, **48% of attempts**. The retry loop converts roughly
 ten points of failure into invisible success. That is the loop working, and it is also why
 the reported reliability of a supervised agent runs ahead of the system underneath it.
+
+---
+
+# salvage.py — did that dead run actually LOSE anything?
+
+`act.py` and `attempts.py` tell you an agent **died**. This tells you whether the death
+**cost** you anything, and it exists because of a sentence a lot of agent runners emit:
+
+> Tomorrow's you: read the log to recover what tonight found.
+
+That is an assertion about the world — *something was found, and it is still in the log* —
+made by a shell script that never opened the log it points at. It is emitted on **every**
+death branch. An assertion emitted on every branch carries zero bits, so it cannot tell you
+which deaths were expensive. In the run that motivated this tool, **19 of 20** such
+pointers led to logs containing nothing but banners and boilerplate.
+
+```
+$ python3 salvage.py
+· NOTHING-LOST   2026-07-20  (10 noise line(s) absorbed)
+⚠ SALVAGEABLE    2026-08-11  (8 noise line(s) absorbed)
+    → I'll start with the wake protocol.
+? CANNOT-ASSESS  2026-08-30  (no log on disk)
+```
+
+**Four states, never two.** `NOTHING-LOST` / `SALVAGEABLE` / `CANNOT-ASSESS` — and a
+missing log is never a pass. A witness that did not show up has not told you the run was
+empty; it has told you nothing at all.
+
+**It names its noise instead of measuring the pile.** The first version of this ranked
+candidate logs by file size and nominated the largest one as the real salvage. Opened, it
+was 8 KB of the same harness warning repeated forty times. *The largest file in the
+population was among the emptiest.* So `NOISE_PATTERNS` is an explicit, short list where
+every entry names the process that emits it, everything unmatched counts as **signal**, and
+the honest reading is scoped to that list: `NOTHING-LOST` means *no line survived the noise
+filter*, not *no thought occurred*. When your harness invents a new species of boilerplate
+this reports SALVAGEABLE until you add it — the correct direction to fail.
+
+## `--attest`: the part that is about this file, not about your logs
+
+This tool shipped with a docstring that stated a census — a count of dead runs, and a claim
+that all of them had lost nothing — which **its own classifier, six inches below, did not
+reproduce.** The process that wrote it was killed 40 seconds later and never executed it.
+Prose and code went to disk disagreeing about both the population size and the verdict
+split, and nothing would ever have reported it, because **nothing reads a docstring.**
+
+The most convincing paragraph was the wrong one. It was headed *"why my first method was
+wrong — here is the better one"*, which is the highest-credibility move available in prose
+and costs nothing to emit. A narrated self-correction is evidence of **revision**, never of
+**correctness**, and it reads as the second thing.
+
+So the file now states no number it did not compute:
+
+```
+$ python3 salvage.py --attest
+attestation · written 2026-09-02 · checked against a live run
+  ✗ patterns_sha   attested='PENDING'   live='607ad349a525bc84'
+  ✗ stub_nights    attested=0           live=20
+✗ STALE on 2 field(s). This file asserts a census its own code does not
+  reproduce — the exact defect it was built to fix, turned inward.
+```
+
+Every count lives in an `ATTESTED` dict written **only** by `--attest --write` from a live
+run, keyed to a **SHA of `NOISE_PATTERNS`** — because the census depends on the noise list
+as much as on the logs, so editing patterns without re-attesting must fire. The check runs
+on **every invocation**, not behind a flag: an opt-in check is one more thing you skip.
+
+This generalizes past this repo. **Documentation inside a verification tool is a state
+file**, with the same failure mode as any other state file — it fails to a stale assertion
+that reads as current truth — and it is *worse* than a plain state file, because its
+position inside a verifier borrows the verifier's credibility while being reached by none
+of the verifier's checks.
+
+## Controls
+
+- `--self-test` synthesizes a log with one line of real thought buried in genuine banners
+  and requires `SALVAGEABLE`. A classifier that can only ever return `NOTHING-LOST` is not
+  measuring anything.
+- The same control carries a **canary**: a real line a human wrote, which must keep
+  surfacing as signal. A noise list wide enough to swallow it has stopped naming noise and
+  started laundering it.
+- `--patterns` prints the noise list and its fingerprint. The tool's honesty is scoped to
+  that list, so the list is readable in one screen.
+
+## Exit codes
+
+| code | meaning |
+|---|---|
+| 0 | every dead run accounted for, nothing salvageable, attestation current |
+| 1 | at least one `SALVAGEABLE` run — go read it |
+| 2 | at least one `CANNOT-ASSESS` and nothing salvageable — an unknown |
+| 3 | attestation stale: this file states a census its code does not reproduce |
+
+## What it cannot see
+
+The runner log captures **stdout**. Everything thought inside a tool call, every file
+written that the runner does not commit — none of it is in there. `NOTHING-LOST` means
+*nothing was lost that the log could have held*, a much smaller claim than *the run found
+nothing*. The 2026-08-20 incident at the top of this README — an agent that published a
+repo and died — reads `NOTHING-LOST` here, correctly and uselessly, because the act left
+the building without passing through stdout. That is `attempts.py`'s arm. This one only
+retires a false directive.
+
+```
+python3 salvage.py             # classify every stub run
+python3 salvage.py --attest    # is the prose still true?
+python3 salvage.py --self-test # can the classifier still disagree?
+python3 test_salvage.py        # 17 tests, stdlib only
+```
+
+Point it at a tree with `journal/` and `.logs/` directories, or set `SALVAGE_ROOT`.
