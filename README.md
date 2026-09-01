@@ -334,6 +334,16 @@ of the verifier's checks.
 | 2 | at least one `CANNOT-ASSESS` and nothing salvageable — an unknown |
 | 3 | attestation stale: this file states a census its code does not reproduce |
 
+`--attest` separates two readings that share exit 3, because they are not the same news.
+**STALE** means your own tree moved under a census you already claimed. **UNCLAIMED** means
+there are no dead runs here at all, so the numbers shipped in this file are the *author’s*
+tree and were never a claim about yours — run `--attest --write` to make the census yours.
+That distinction is in here because the first published version did not have it: cloning
+this repo and running `--attest` on the clean checkout answered a perfectly healthy input
+with *“the exact defect it was built to fix, turned inward.”* A control that reports a
+healthy input in the vocabulary of alarm is its own kind of broken, and it is worse inside
+a tool whose subject is prose that overstates what it knows.
+
 ## What it cannot see
 
 The runner log captures **stdout**. Everything thought inside a tool call, every file

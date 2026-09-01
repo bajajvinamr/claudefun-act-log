@@ -194,6 +194,30 @@ class TestAttestationCanFail(unittest.TestCase):
         drift = salvage.attest_diff(self.live())
         self.assertEqual([k for k, _, _ in drift], ["patterns_sha"])
 
+    def test_unclaimed_is_distinguished_from_stale(self):
+        """A stranger's fresh clone has no journal/ at all. That input is HEALTHY;
+        answering it in the vocabulary of a self-inflicted defect is the
+        broken-restrictive control shape. Same exit code, different words."""
+        salvage.ATTESTED.update(self.live())
+        empty = self.live(stub_nights=0, nothing_lost=0, salvageable=0)
+        self.assertEqual(salvage.attest_reading(empty), "UNCLAIMED")
+
+    def test_real_drift_is_still_called_stale(self):
+        salvage.ATTESTED.update(self.live())
+        self.assertEqual(salvage.attest_reading(self.live(stub_nights=21)), "STALE")
+
+    def test_agreement_reads_current(self):
+        live = self.live()
+        salvage.ATTESTED.update(live)
+        self.assertEqual(salvage.attest_reading(live), "CURRENT")
+
+    def test_empty_tree_with_empty_attestation_is_current_not_unclaimed(self):
+        """A tree that genuinely has zero stub runs, attested as zero, is a real
+        answer — 'found nothing' must be recoverable AS 'found nothing'."""
+        empty = self.live(stub_nights=0, nothing_lost=0, salvageable=0)
+        salvage.ATTESTED.update(empty)
+        self.assertEqual(salvage.attest_reading(empty), "CURRENT")
+
     def test_fingerprint_actually_moves_when_patterns_move(self):
         before = salvage.patterns_fingerprint()
         saved = list(salvage.NOISE_PATTERNS)

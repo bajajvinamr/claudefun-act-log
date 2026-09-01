@@ -264,6 +264,26 @@ def attest_diff(live):
     return [(k, ATTESTED.get(k), live[k]) for k in ATTEST_KEYS if ATTESTED.get(k) != live[k]]
 
 
+def attest_reading(live):
+    """CURRENT / UNCLAIMED / STALE — because two of those are not the same news.
+
+    Found by cloning the published version and running it, 2026-09-02: a stranger's
+    fresh clone has no journal/ at all, so the census is legitimately zero, and the
+    first version answered that HEALTHY input with 'the exact defect it was built to
+    fix, turned inward.' A control that reports a healthy input in the vocabulary of
+    alarm is the broken-restrictive shape I have now hit three times — and I shipped
+    it, publicly, inside the tool whose whole subject is prose that overstates what
+    it knows. Same exit code (3 — an unclaimed attestation is still not a pass), but
+    the words have to be true: the numbers in this file are the AUTHOR's tree, and
+    they were never a claim about yours.
+    """
+    if not attest_diff(live):
+        return "CURRENT"
+    if live["stub_nights"] == 0 and ATTESTED.get("stub_nights", 0) > 0:
+        return "UNCLAIMED"
+    return "STALE"
+
+
 def attest_write(live, today):
     """Rewrite the ATTESTED block from a live run. The only writer of those numbers."""
     body = SELF.read_text()
@@ -341,9 +361,18 @@ def main(argv):
         for k in ATTEST_KEYS:
             hit = ATTESTED.get(k) == live[k]
             print(f"  {'✓' if hit else '✗'} {k:<14} attested={ATTESTED.get(k)!r:<20} live={live[k]!r}")
-        if not drift:
+        reading = attest_reading(live)
+        if reading == "CURRENT":
             print("✓ CURRENT — every number this file states, it computed.")
             return 0
+        if reading == "UNCLAIMED":
+            print(f"\n? UNCLAIMED on {len(drift)} field(s) — and this is not an accusation.")
+            print("  There are no runner-stub journals here at all, so the numbers above")
+            print("  are the AUTHOR's tree and were never a claim about yours. Point the")
+            print("  tool at a tree with journal/ and .logs/ (or set SALVAGE_ROOT), then")
+            print("  `--attest --write` to make the census yours. Not a pass: until then")
+            print("  this file states a figure that describes somebody else's world.")
+            return 3
         print(f"\n✗ STALE on {len(drift)} field(s). This file asserts a census its own")
         print("  code does not reproduce — the exact defect it was built to fix,")
         print("  turned inward. Run `--attest --write` and read the diff.")
@@ -351,6 +380,10 @@ def main(argv):
 
     if not rows:
         print("no runner-stub journals found — nothing to salvage.")
+        if attest_reading(live) == "UNCLAIMED":
+            print(f"  (this file still carries the author's census of "
+                  f"{ATTESTED['stub_nights']} stub run(s), written {ATTESTED['generated_at']}."
+                  f" `--attest` explains.)")
         return 0
 
     salvage, unknown = [], []
