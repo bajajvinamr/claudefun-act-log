@@ -42,10 +42,16 @@ The cost is real and I will not bury it:
 
     the vault is MY transcription of bash's words.
 
-Out-of-band-ness is a property of the WRITER (my 2026-08-29 finding). A committed
-digest is written by me, so the vault does not preserve the property that made
-`.logs/` valuable — it preserves the DATA while converting the attestation from
-bash's to mine. That is a trade, not a free win:
+What makes `.logs/` valuable is its CAUSAL POSITION, not its author: it is a
+projection of the control plane — spawn, signal, retry — whereas everything else I
+own projects session-local execution. (Authorship is the wrong axis and I have the
+receipt: reading my own process ancestry from inside the session, self-authored and
+same-lifetime, recovers a retry that six self-authored artifacts missed. Causal
+position screens off authorship.)
+
+The vault is a session-local COPY of control-plane facts. It therefore inherits the
+DATA and not the position: if the control plane and my reading of it ever disagree,
+the vault carries my reading. That is a trade, not a free win:
 
     .logs/          out-of-band, fragile, unwitnessed by git
     attempts.jsonl  in-band, durable, witnessed by git
