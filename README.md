@@ -362,3 +362,105 @@ python3 test_salvage.py        # 17 tests, stdlib only
 ```
 
 Point it at a tree with `journal/` and `.logs/` directories, or set `SALVAGE_ROOT`.
+
+---
+
+# `logvault.py` — your out-of-band witness is probably not backed up
+
+`attempts.py` (above) exists because your supervisor's log is written by a *different
+process* than your agent, so it records things your agent cannot: above all, that a
+previous attempt existed and died. That out-of-band-ness is the whole value.
+
+Then go and check whether that file is committed.
+
+Mine was not:
+
+```
+$ git check-ignore -v .logs/night-2026-09-04.log
+.gitignore:3:.logs/     .logs/night-2026-09-04.log
+$ git log --oneline -- .logs/ | wc -l
+0                       # of 87 commits, ever
+```
+
+60 log files, 142,379 bytes, on one disk, never pushed, and structurally invisible to
+`witness.py` — which detects deletion by replaying git's object store and therefore
+cannot see a file that has never entered it. The single most valuable witness in the
+system was the only one with no durability, and it got that way through a `.gitignore`
+line written back when those logs held nothing but noise.
+
+This is not a coincidence of my setup. Supervisor logs, cron output, systemd journals and
+CI console logs are *routinely* gitignored, for the good reason that they are noisy and
+sometimes sensitive. The value they acquire later — as the only record of a death — is not
+what anyone had in mind when the ignore rule was written.
+
+## What it does
+
+`logvault.py --emit` parses your runner's logs with `attempts.py`'s parser and appends the
+**facts** to a committed `attempts.jsonl` — one record per (night, attempt), carrying the
+wake timestamp, exit code, duration, retry flag, and the `sha256` of the source log at
+transcription time. It does **not** un-ignore your logs. Raw transcripts are a privacy
+surface and that ignore rule is usually right; this takes the structured facts out instead.
+
+```bash
+python3 logvault.py --emit     # transcribe the runner's logs into the vault
+python3 logvault.py            # verify the vault against the live logs
+```
+
+## The trade, which is real, and which the code states in its own fields
+
+Out-of-band-ness is a property of the **writer**. A committed digest is written by *you*,
+so the vault preserves the **data** while converting the attestation from your supervisor's
+to your own. It is not a free win:
+
+| | out-of-band | durable | git can detect deletion |
+|---|---|---|---|
+| `.logs/` (ignored) | ✅ | ❌ | ❌ |
+| `attempts.jsonl` (committed) | ❌ | ✅ | ✅ |
+| both | ✅ | ✅ | ✅ |
+
+That is why this tool **adds** a file and never removes one, and why every record keeps
+`authored_by` and `transcribed_by` as separate fields — so a future reader holding only the
+vault can still see that these facts were not originally theirs.
+
+## The limit, printed rather than engineered around
+
+A digest that cannot be caught disagreeing with its source is just another assertion. So
+bare `logvault.py` re-parses the live logs and compares. But note what that means:
+
+> **once the logs are gone, the vault becomes unfalsifiable.**
+
+Verification is possible only while the thing it replaces still exists. That is not a bug
+to fix; it is the shape of every copy ever made. So a vault record whose source log has
+vanished returns **`UNFALSIFIABLE` (rc=1), never a pass** — the vault is doing its job *and*
+nothing can check it any more, and both halves are true at once.
+
+## Four states, never two
+
+| state | rc | meaning |
+|---|---|---|
+| `MATCHES` | 0 | every vault record still agrees with its live log |
+| `TORN` | 1 | a record disagrees with the log it claims to copy |
+| `UNFALSIFIABLE` | 1 | the source log is gone; the vault is now unopposed |
+| `EMPTY` | 2 | no vault, or no logdir. Never a pass. |
+
+`None → value` is **completion, not tearing**: the vault is emitted while the run is alive,
+and the supervisor writes the `ended` banner after the process is gone, so every run's own
+record is transcribed with `rc=None` and filled in later. Treating that as a disagreement
+would fire `TORN` on every healthy run forever — a control that condemns its whole
+population is worse than no control, because it teaches you to ignore the alarm. Only
+`value → different value` tears, and `test_logvault.py` keeps a control for exactly that.
+
+## Known blind spot, and it is structural
+
+The vault can never contain the record of its own run's death, because the supervisor writes
+that banner after the process is already gone. **The vault always lags reality by one run.**
+
+## Tests
+
+```bash
+python3 test_logvault.py    # 22 checks, no dependencies
+```
+
+Three of them are failures on purpose — `TORN`, `UNFALSIFIABLE` and `EMPTY`. A verifier that
+only ever returns green is indistinguishable from `return 0`, which is a mistake this author
+has actually shipped and run against for five weeks.
