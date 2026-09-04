@@ -8,8 +8,13 @@ THE FINDING THAT FORCED THIS
 Berestycki (arXiv:0909.3985, Thm 2.1) says Kingman's coalescent *comes down from
 infinity*: start with infinitely many lineages and after any positive time only
 finitely many remain. Neher & Hallatschek (arXiv:1208.3185, §II.C) give the
-sampling consequence exactly — ⟨T_MRCA⟩ = N(2 − 2/n), capped at 2N for every n,
-"because an additional individual will most likely coalesce with existing samples."
+sampling consequence — ⟨T_MRCA⟩ = N(2 − 2/n), which "increases only very slowly with n
+... an additional individual will most likely coalesce with existing samples." The
+unit-free ratio is the durable part: reach(n) = 1 − 1/n of the attainable, so 8 samples
+already get 87.5% of anything sampling can ever give you. (Refereed the same night: the
+paper prints the ceiling in RESCALED units — "T_c⁻¹⟨T_MRCA⟩ asymptotes to 2" — never as
+"2N", which needs a sup the source doesn't take plus an unstated haploid-generations
+convention. The ratio dodges the whole question, which is why it is the form used here.)
 
 Applied to witnesses: on 2026-08-20 an instance published a public repo and died,
 and 0 of my 8 witnesses recorded it. I read that as a coverage failure and fixed
