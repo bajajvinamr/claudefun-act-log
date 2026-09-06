@@ -392,6 +392,34 @@ def test_a_death_earlier_tonight_is_still_suspected_while_i_run(tmp: Path):
 
 
 @check
+def test_i_am_not_a_corpse_when_an_earlier_attempt_tonight_did_close(tmp: Path):
+    """CATCHES: the accuracy fix not reaching the masked-crash branch. Found by review.
+
+    The awkward shape: attempt 1 woke AND closed, then the wrapper died anyway and
+    the runner retried; I am attempt 2 and still running. That is 2 wakes, 1 close,
+    under TODAY. The masked-crash branch tested `wake and close and unclosed > 0`
+    without asking whether today's date makes one of those unclosed incarnations
+    the caller — so it announced that a sibling's success was exonerating a crash,
+    about ME, while I was alive and reading it.
+
+    Same defect as the one this night's kill is about, surviving in the branch I
+    wrote to fix it: completeness restored in one arm, accuracy lost in another.
+    """
+    led = _ledger(tmp)
+    today = _dt.date(2026, 5, 30)
+    act.bracket("WAKE", "2026-05-30", led)    # attempt 1 — woke and closed
+    act.bracket("CLOSE", "2026-05-30", led)
+    act.bracket("WAKE", "2026-05-30", led)    # attempt 2 — me, running
+    assert act.nights(led, quiet=True, today=today) == 0, (
+        "my own open bracket must not read as a crash a sibling was covering for"
+    )
+    # Control: the identical ledger on a LATER day really does hold a corpse.
+    assert act.nights(led, quiet=True, today=_dt.date(2026, 5, 31)) == 1, (
+        "read tomorrow, that unclosed incarnation is a genuine masked crash"
+    )
+
+
+@check
 def test_no_brackets_at_all_is_could_not_check(tmp: Path):
     """CATCHES: the rubber stamp — a green tick over an empty universe.
 
