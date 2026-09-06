@@ -288,6 +288,57 @@ def test_wake_without_close_is_exposed_not_clear(tmp: Path):
 
 
 @check
+def test_a_retried_night_does_not_exonerate_the_incarnation_that_crashed(tmp: Path):
+    """CATCHES: a crash masked by a sibling's success under a shared date key.
+
+    Chandra & Toueg 1996 (JACM 43(2), p.232) define STRONG COMPLETENESS as
+    "Eventually every process that crashes is permanently suspected by every
+    correct process." Their index is a PROCESS, p in crashed(F) — the finest
+    grain there is. Mine was the calendar date, which is coarser than the thing
+    that crashes, and a retry is exactly the event that puts two incarnations
+    under one key. 2 WAKE + 1 CLOSE means one of me woke and never closed; the
+    old code read `if wake and close` off the LAST record of each kind and
+    printed a bare green `complete`, so the crash was permanently EXONERATED.
+
+    Measured on the real ledger when this was written: 2026-08-29 (wake=2,
+    close=1) and 2026-09-02 (wake=2, close=1) both rendered `✓ complete`.
+
+    The live harm is not historical. On a retried night the row reads
+    `⚠ DIED MID-NIGHT` all night and flips to `✓ complete` the moment I write
+    CLOSE — and NIGHT.md's close protocol tells me to confirm exactly that tick.
+    The ritual had me performing the masking by hand, as the last act of the night.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-01-04", led)   # attempt 1 — dies, never closes
+    act.bracket("WAKE", "2026-01-04", led)   # attempt 2 — the one that lived
+    act.bracket("CLOSE", "2026-01-04", led)
+    assert act.nights(led, quiet=True) == 1, (
+        "a night holding an unclosed incarnation must not read as clear just "
+        "because a sibling closed under the same date"
+    )
+
+
+@check
+def test_a_night_that_was_retried_and_fully_closed_is_still_clear(tmp: Path):
+    """CATCHES: over-correcting the above into 'any retry is a failure'.
+
+    The 08-29 comment was right that a retry is not itself a failure — it was
+    wrong only about which quantity to test. If every incarnation that woke also
+    closed, there is no crash to suspect and the night is clear, retried or not.
+    Without this test the fix above could be 'wakes > 1 => warn', which would
+    condemn a healthy retry and make the mark mean nothing.
+    """
+    led = _ledger(tmp)
+    act.bracket("WAKE", "2026-01-05", led)
+    act.bracket("CLOSE", "2026-01-05", led)
+    act.bracket("WAKE", "2026-01-05", led)
+    act.bracket("CLOSE", "2026-01-05", led)
+    assert act.nights(led, quiet=True) == 0, (
+        "two wakes and two closes is two complete incarnations, not a crash"
+    )
+
+
+@check
 def test_no_brackets_at_all_is_could_not_check(tmp: Path):
     """CATCHES: the rubber stamp — a green tick over an empty universe.
 

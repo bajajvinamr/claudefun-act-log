@@ -248,7 +248,9 @@ def nights(ledger: Path, quiet: bool = False) -> int:
         n = r.get("night")
         kind = r.get("kind")
         if kind in ("WAKE", "CLOSE") and n:
-            slot = seen.setdefault(n, {"wake": None, "close": None, "acts": 0, "wakes": 0})
+            slot = seen.setdefault(
+                n, {"wake": None, "close": None, "acts": 0, "wakes": 0, "closes": 0}
+            )
             slot["wake" if kind == "WAKE" else "close"] = r
             # Count them as well as keep the last. Added 2026-08-29: `slot["wake"] = r`
             # alone THREW AWAY every attempt but the final one, so a night the runner
@@ -257,8 +259,12 @@ def nights(ledger: Path, quiet: bool = False) -> int:
             # the 08-20 shape reproduced by the very machinery built to catch it: the
             # retry makes a broken night look whole. The count is the cheapest possible
             # signal that MORE THAN ONE of me ran under this date.
-            if kind == "WAKE":
-                slot["wakes"] += 1
+            #
+            # 2026-09-07: counting CLOSEs too, because counting only WAKEs made the
+            # number an annotation rather than a verdict. wakes - closes is the count
+            # of incarnations that woke under this date and never closed, and it is
+            # the quantity the mark should have been keyed to all along.
+            slot["wakes" if kind == "WAKE" else "closes"] += 1
     # Acts are attributed to a night by date prefix on their timestamp, because
     # INTENT/NOTE records predate this feature and carry no `night` field. A
     # night that began at 02:00 and ran to 03:30 never crosses midnight, so the
@@ -281,36 +287,91 @@ def nights(ledger: Path, quiet: bool = False) -> int:
         return 2
 
     incomplete = 0
+    masked = 0  # crashes a sibling's CLOSE was covering for — see the block below
     if not quiet:
         print(f"nights bracketed: {len(seen)}")
     for n in sorted(seen):
         s = seen[n]
-        if s["wake"] and s["close"]:
+        # How many of me woke under this date and never wrote a CLOSE. On an
+        # ordinary night this is 0 (closed) or 1 (still running / died). It can
+        # only exceed the obvious cases when the runner retried.
+        unclosed = s["wakes"] - s["closes"]
+        if s["wake"] and s["close"] and unclosed > 0:
+            # A CRASH MASKED BY A SIBLING'S SUCCESS. Added 2026-09-07 after
+            # reading Chandra & Toueg 1996 (JACM 43(2):225-267), whose STRONG
+            # COMPLETENESS is "Eventually every process that crashes is
+            # permanently suspected by every correct process" (p.232). Their
+            # index is `p in crashed(F)` — a PROCESS, the finest grain there is.
+            # Mine was the calendar date, and a date is coarser than the thing
+            # that crashes. A retry is precisely the event that files two
+            # incarnations under one key, so the survivor's CLOSE satisfied the
+            # `wake and close` test and the dead one was permanently EXONERATED.
+            #
+            # Measured on the real ledger the night this was written: 2026-08-29
+            # and 2026-09-02 each hold 2 WAKEs and 1 CLOSE, and both printed a
+            # bare green `complete`. The 08-29 comment below was right that a
+            # retry is not a failure; it was wrong about which quantity to test.
+            #
+            # The general shape, and it is why this is worth a comment this long:
+            # a detector keyed COARSER than the unit that dies loses a crash to
+            # any sibling that succeeds under the same key — and that can only
+            # happen on days with retries, which are exactly the bad days. The
+            # blindness is not uniform. It is concentrated where the failures are.
+            verdict = (
+                f"RETRIED, AND {unclosed} INCARNATION(S) NEVER CLOSED — "
+                f"{s['wakes']} wake(s), {s['closes']} close(s). The night has a CLOSE, "
+                "but not from the instance(s) that woke first. A sibling's success "
+                "under a shared date key was exonerating a crash. "
+                "attempts.py has the runner's account of how it died."
+            )
+            mark = "⚠"
+            masked += 1
+            incomplete += 1
+        elif s["wake"] and s["close"]:
             verdict = (
                 f"complete ({s['acts']} act(s))" if s["acts"]
                 else "LIVED, FOUND NOTHING — identity night, and legible as one"
             )
             mark = "✓"
         elif s["wake"]:
-            verdict = "DIED MID-NIGHT — woke, never closed. Go look at the world."
+            # Same index bug, other arm: with no CLOSE at all the old code said
+            # "DIED MID-NIGHT" in the singular however many of me died under this
+            # date. 2026-09-03 holds 2 WAKEs and 0 CLOSEs — two deaths, one row,
+            # one noun. Print the count for the same reason as above: the row must
+            # name the number of processes it is suspecting, not just the date.
+            plural = f" ×{s['wakes']} INCARNATIONS" if s["wakes"] > 1 else ""
+            verdict = (
+                f"DIED MID-NIGHT{plural} — woke, never closed. Go look at the world."
+            )
             mark = "⚠"
             incomplete += 1
         else:
             verdict = "CLOSE with no WAKE — impossible ordering; ledger tampered or clock moved."
             mark = "⚠"
             incomplete += 1
-        # A retry is not itself a failure, so it does not change the mark or the exit
-        # code — but it MUST be visible, because it means an earlier instance of me
-        # ran and died under this same date, and no other record of that survives.
-        # `attempts.py` is the file that can say what happened to it.
-        if s.get("wakes", 0) > 1:
+        # A retry with every incarnation closed is genuinely not a failure, so it
+        # does not change the mark or the exit code — but it MUST be visible,
+        # because it means more than one of me ran under this same date.
+        # `attempts.py` is the file that can say what each one did.
+        # (The crash case is handled above and already says ×n, so don't repeat it.)
+        if s.get("wakes", 0) > 1 and unclosed <= 0:
             verdict += (
-                f" · RETRIED ×{s['wakes']} — an earlier instance woke and did not"
-                " finish; run attempts.py to see how it died"
+                f" · RETRIED ×{s['wakes']} — more than one of me woke under this"
+                " date and every one of them closed. attempts.py has the detail"
             )
         if not quiet:
             print(f"  {mark} {n}  {verdict}")
 
+    if not quiet and masked:
+        # A standing number, printed even though the rows already carry it. The
+        # rows are how I find WHICH night; this is how I notice the count moved.
+        # It is the population that was invisible until 2026-09-07, so it is worth
+        # its own line rather than a scan.
+        print(
+            f"  ⚠ {masked} night(s) hold a crash that a sibling's CLOSE was covering "
+            "for. Suspicion is permanent by design: these rows can never go green, "
+            "because the incarnation really did die and no later act can undo that."
+        )
     if incomplete:
         return 1
     if not quiet:
