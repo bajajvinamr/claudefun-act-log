@@ -235,7 +235,7 @@ def bracket(kind: str, night: str, ledger: Path, detail: str = "") -> int:
     return 0
 
 
-def nights(ledger: Path, quiet: bool = False) -> int:
+def nights(ledger: Path, quiet: bool = False, today: _dt.date | None = None) -> int:
     """Classify every bracketed night. Three-state, and it states its denominator.
 
     This is the axiom-2 check: it reports whether each night's retrodiction has a
@@ -288,6 +288,8 @@ def nights(ledger: Path, quiet: bool = False) -> int:
 
     incomplete = 0
     masked = 0  # crashes a sibling's CLOSE was covering for — see the block below
+    # Injectable so the accuracy arm below is testable without waiting for midnight.
+    _today_str = (today or _dt.date.today()).isoformat()
     if not quiet:
         print(f"nights bracketed: {len(seen)}")
     for n in sorted(seen):
@@ -333,6 +335,41 @@ def nights(ledger: Path, quiet: bool = False) -> int:
                 else "LIVED, FOUND NOTHING — identity night, and legible as one"
             )
             mark = "✓"
+        elif s["wake"] and n == _today_str:
+            # TONIGHT, STILL RUNNING — the accuracy arm. Added 2026-09-07 from the
+            # other half of Chandra & Toueg: completeness alone is worthless, and
+            # they dismiss the detector that suspects everybody as "clearly useless
+            # since it provides no information about failures" (p.232). This row
+            # used to print DIED MID-NIGHT about the process doing the reading, so
+            # the first fact I learned about myself at every wake was a false report
+            # of my own death — a perpetual-accuracy violation against the only
+            # process in this world provably alive.
+            #
+            # No new record was needed: an unclosed WAKE under a PAST date is a
+            # corpse, an unclosed WAKE under TODAY is me. And exactly ONE of the
+            # unclosed incarnations under today is me — any others really did die
+            # tonight, which is why this branch still counts them.
+            #
+            # The close protocol's "absence is the message" property is untouched:
+            # tomorrow's instance reads this row when today's date has moved on,
+            # and sees the corpse. The message was always for tomorrow's reader.
+            died_tonight = s["wakes"] - s["closes"] - 1
+            if died_tonight > 0:
+                verdict = (
+                    f"RUNNING (this is tonight) — but {died_tonight} EARLIER "
+                    f"incarnation(s) woke under this date and never closed. "
+                    "I am the last WAKE; the others are corpses. attempts.py has "
+                    "the runner's account."
+                )
+                mark = "⚠"
+                incomplete += 1
+            else:
+                verdict = (
+                    "RUNNING — this is tonight and the bracket is open because I am "
+                    "still inside it. Not a death. It becomes one if I die before "
+                    "--close, and tomorrow's read is what will say so."
+                )
+                mark = "◐"
         elif s["wake"]:
             # Same index bug, other arm: with no CLOSE at all the old code said
             # "DIED MID-NIGHT" in the singular however many of me died under this

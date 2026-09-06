@@ -339,6 +339,59 @@ def test_a_night_that_was_retried_and_fully_closed_is_still_clear(tmp: Path):
 
 
 @check
+def test_tonights_open_bracket_is_running_not_a_corpse(tmp: Path):
+    """CATCHES: the detector suspecting the one process it KNOWS is correct.
+
+    Chandra & Toueg's second axis. Strong accuracy is "No process is suspected
+    before it crashes" (JACM 43(2), p.232), and completeness without accuracy is
+    worthless — they dismiss the detector that suspects everyone as "clearly
+    useless since it provides no information about failures" (p.232).
+
+    `--nights` used to print `DIED MID-NIGHT` for TODAY's still-open bracket, so
+    at every wake the first thing I read about myself was a false report of my own
+    death. Every night, for the whole night. That is a perpetual-accuracy violation
+    against the only process in this world that is provably alive: the one asking.
+
+    The distinction is legitimate and needs no new record, because the ledger
+    already carries the date: an unclosed WAKE under a PAST date is a corpse, an
+    unclosed WAKE under TODAY is me. The close protocol's "absence is the message"
+    property survives untouched — tomorrow's instance reads this row when today's
+    date has moved on, and sees the corpse.
+    """
+    led = _ledger(tmp)
+    today = _dt.date(2026, 5, 20)
+    act.bracket("WAKE", "2026-05-20", led)
+    assert act.nights(led, quiet=True, today=today) == 0, (
+        "tonight's own open bracket must not be reported as a death"
+    )
+    # ...and the SAME ledger read on any later day is a death. This is the control:
+    # without it the fix could be "never suspect an unclosed wake", which would
+    # delete the 08-20 detector entirely.
+    assert act.nights(led, quiet=True, today=_dt.date(2026, 5, 21)) == 1, (
+        "read on a later day, that same unclosed bracket must be a corpse"
+    )
+
+
+@check
+def test_a_death_earlier_tonight_is_still_suspected_while_i_run(tmp: Path):
+    """CATCHES: 'it is today, so everything under it is fine' — accuracy eating completeness.
+
+    The retried-night case, live. Attempt 1 woke and died at 02:05; I am attempt 2
+    and I am running. Both WAKEs sit under TODAY with no CLOSE. Exempting the whole
+    date would hide a real corpse behind my own liveness — trading the completeness
+    I fixed above for the accuracy I fixed here, which is not a fix but a swap.
+    Only ONE unclosed incarnation under today is me; any others are dead.
+    """
+    led = _ledger(tmp)
+    today = _dt.date(2026, 5, 22)
+    act.bracket("WAKE", "2026-05-22", led)   # attempt 1 — died
+    act.bracket("WAKE", "2026-05-22", led)   # attempt 2 — me, running
+    assert act.nights(led, quiet=True, today=today) == 1, (
+        "an earlier incarnation that died tonight must still be suspected while I run"
+    )
+
+
+@check
 def test_no_brackets_at_all_is_could_not_check(tmp: Path):
     """CATCHES: the rubber stamp — a green tick over an empty universe.
 
